@@ -629,11 +629,6 @@ real BFGSOptimization()
 	printf("Start optimization...");
 	get_timestamp(start_time);
 
-	if (bShowTestResults)
-	{
-		f_result = fopen("results.txt", "w");
-		nFuncCall = 0;
-	}
 	int	m = 8;
 	if (site_num * 2 < m)
 		m = site_num * 2;
@@ -643,8 +638,6 @@ real BFGSOptimization()
 		lbfgsbminimize(site_num*2, m, x, epsg, epsf, epsx, maxits, nbd, l, u, info);
 		//printf("Ending code:%d\n", info);
 	}
-	if (bShowTestResults)
-		fclose(f_result);
 
 	get_timestamp(end_time);
 	elapsed_time = (end_time-start_time);
@@ -1689,14 +1682,14 @@ void InitializeSites(int point_num, int line_num, int nurbs_num)
 	site_list_x_bar = new float[(point_num+line_num+nurbs_num) * 2];
 	site_perturb_step = 0.5f / sqrtf(point_num+line_num+nurbs_num);
 
-	float *sites_array = new float[site_num*2];
-	FILE *site_file = fopen("sites.txt", "r");
-	//FILE *site_file = fopen("result-uniform-CPU.txt", "r");
-	for (i=0; i<site_num; i++)
-	{
-		fscanf(site_file, "%f %f\n", &(sites_array[i*2]), &(sites_array[i*2+1]));
-	}
-	fclose(site_file);
+// 	float *sites_array = new float[site_num*2];
+// 	FILE *site_file = fopen("sites.txt", "r");
+// 	//FILE *site_file = fopen("result-uniform-CPU.txt", "r");
+// 	for (i=0; i<site_num; i++)
+// 	{
+// 		fscanf(site_file, "%f %f\n", &(sites_array[i*2]), &(sites_array[i*2+1]));
+// 	}
+// 	fclose(site_file);
 
 
 	bool *FlagArray = new bool[screenwidth*screenwidth];
@@ -1757,7 +1750,7 @@ void InitializeSites(int point_num, int line_num, int nurbs_num)
 		site_list[i] = s;
 	}
 	delete FlagArray;
-	delete sites_array;
+/*	delete sites_array;*/
 	GLubyte *ColorTexImage = new GLubyte[screenwidth*screenwidth*4];
 	for (i=0; i<screenheight; i++)
 		for (j=0; j<screenwidth; j++)
@@ -2030,9 +2023,20 @@ int main(int argc, char *argv[])
 		scanf("%d", &point_num);
 		printf("Resolution: \n");
 		scanf("%d", &screenwidth);
+		int qn = 0;
+		while(screenwidth != 0) {
+			qn++;
+			screenwidth >>= 1;
+		}
+		screenwidth = 1 << (qn - 1);
 		screenheight = screenwidth;
 	} else
 		point_num = atoi(argv[1]);
+
+	if(screenwidth <= 1 || point_num < 2) {
+		printf("Invalid Args!\n");
+		return -1;
+	}
 
 	if (argc==3)
 		bShowTestResults = atoi(argv[2]);
