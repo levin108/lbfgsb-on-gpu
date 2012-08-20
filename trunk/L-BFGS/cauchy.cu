@@ -503,7 +503,7 @@ namespace lbfgsbcuda {
 			real f2 = -theta * *f1_h - *fd_h;
 			real dt = -*f1_h / f2;
 			
-			real dtm = __min(*bkmin_h, dt);
+			real dtm = __max(*bkmin_h, dt);
 			dtm = __max(0, dtm);
 			
 			kernel3<<<dim3(iDivUp(n, 512)), dim3(512), 0, streamPool[0]>>>
