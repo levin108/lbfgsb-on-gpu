@@ -160,7 +160,7 @@ namespace lbfgsbcuda {
 
 			real* output = (nblock1 == 1) ? sbgnrm_dev : buf_n;
 
-			dynamicCall(kernel0, mi, nblock1, 1, stream, (n, l, u, nbd, x, g, buf_n));
+			dynamicCall(kernel0, mi, nblock1, 1, stream, (n, l, u, nbd, x, g, output));
 
 			nblock0 = nblock1;
 			while(nblock0 > 1) {
