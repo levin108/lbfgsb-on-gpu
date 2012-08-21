@@ -55,29 +55,8 @@ extern cublasHandle_t cublasHd;
 	case 7: \
 		f<128><<<dim3(nblockx, nblocky), dim3(128), 0, st>>>var;\
 		break;\
-	case 6: \
-		f<64><<<dim3(nblockx, nblocky), dim3(64), 0, st>>>var;\
-		break;\
-	case 5: \
-		f<32><<<dim3(nblockx, nblocky), dim3(32), 0, st>>>var;\
-		break;\
-	case 4: \
-		f<16><<<dim3(nblockx, nblocky), dim3(16), 0, st>>>var;\
-		break;\
-	case 3: \
-		f<8><<<dim3(nblockx, nblocky), dim3(8), 0, st>>>var;\
-		break;\
-	case 2: \
-		f<4><<<dim3(nblockx, nblocky), dim3(4), 0, st>>>var;\
-		break;\
-	case 1: \
-		f<2><<<dim3(nblockx, nblocky), dim3(2), 0, st>>>var;\
-		break;\
-	case 0: \
-		f<1><<<dim3(nblockx, nblocky), dim3(1), 0, st>>>var;\
-		break;\
 	default: \
-		printf("Unsupported!"); \
+		f<64><<<dim3(nblockx, nblocky), dim3(64), 0, st>>>var;\
 		break;\
 	} \
 }
@@ -141,6 +120,7 @@ namespace lbfgsbcuda {
 		real lnb = log10((real)n);
 		real nker = ceil(lnb * inv9l2);
 		int m = ceil(lnb * invl2 / nker);
+		m = __max(6, m);
 		return m;
 	}
 	inline void CheckBuffer(const real* q, int stride, int total) {
