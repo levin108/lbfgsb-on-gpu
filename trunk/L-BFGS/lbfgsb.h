@@ -40,6 +40,7 @@ extern bool bNewIteration;
 extern FILE* f_result;
 extern int nFuncCall;
 extern bool bShowTestResults;
+extern real stpscal;
 
 inline int iAlignUp(int a, int b)
 {

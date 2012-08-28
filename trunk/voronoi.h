@@ -93,6 +93,7 @@ bool bNewIteration;
 int numIter;
 FILE *f_result;
 cublasHandle_t cublasHd;
+double stpscal;
 
 GLuint ScreenPointsList;
 

@@ -595,6 +595,7 @@ real BFGSOptimization()
 	const real epsf = EPSF;
 	const real epsx = EPSX;
 	const int maxits = MAXITS;
+	stpscal = 2.75f; //Set for different problems!
 	int info;
 
 	total_time = 0;
