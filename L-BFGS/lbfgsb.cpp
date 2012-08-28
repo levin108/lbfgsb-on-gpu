@@ -1266,6 +1266,7 @@ inline void lbfgsbdcsrch(const real& f,
         {
             lbfgsbdcstep(stx, fx, gx, sty, fy, gy, stp, f, g, brackt, stmin, stmax);
         }
+		stp *= stpscal;
         if( brackt )
         {
             if( fabs(sty - stx) >= 0.666666666666666667 * width1 )
@@ -1341,74 +1342,74 @@ inline void lbfgsbdcstep(real& stx,
     register real theta;
 	register real stpstx;
 
-    sgnd = dp * dx / fabs(dx);
-    if( fp > fx )
-    {
-        theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
-        s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
-        gamma = s * sqrt(sqrt(theta / s) - dx / s * (dp / s));
-        if( stp < stx )
-        {
-            gamma = -gamma;
-        }
-        p = gamma - dx + theta;
-        q = gamma - dx + gamma + dp;
-        r = p / q;
+	sgnd = dp * dx / fabs(dx);
+	if( fp > fx )
+	{
+		theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
+		s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
+		gamma = s * sqrt((theta * theta) / (s * s) - dx / s * (dp / s));
+		if( stp < stx )
+		{
+			gamma = -gamma;
+		}
+		p = gamma - dx + theta;
+		q = gamma - dx + gamma + dp;
+		r = p / q;
 		stpstx = stp - stx;
-        stpc = stx + r * stpstx;
-        stpq = stx + dx / ((fx - fp) / stpstx + dx) * 0.5 * stpstx;
-        if( fabs(stpc - stx) < fabs(stpq - stx) )
-        {
-            stpf = stpc;
-        }
-        else
-        {
-            stpf = stpc + (stpq - stpc) * 0.5;
-        }
-        brackt = true;
-    }
-    else if( sgnd < 0 )
-    {
-        theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
-        s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
-        gamma = s * sqrt(sqrt(theta / s) - dx * dp / (s * s));
-        if( stp > stx )
-        {
-            gamma = -gamma;
-        }
-        p = gamma - dp + theta;
-        q = gamma * 2.0 - dp + dx;
-        r = p / q;
+		stpc = stx + r * stpstx;
+		stpq = stx + dx / ((fx - fp) / stpstx + dx) * 0.5 * stpstx;
+		if( fabs(stpc - stx) < fabs(stpq - stx) )
+		{
+			stpf = stpc;
+		}
+		else
+		{
+			stpf = stpc + (stpq - stpc) * 0.5;
+		}
+		brackt = true;
+	}
+	else if( sgnd < 0 )
+	{
+		theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
+		s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
+		gamma = s * sqrt((theta * theta) / (s * s) - dx * dp / (s * s));
+		if( stp > stx )
+		{
+			gamma = -gamma;
+		}
+		p = gamma - dp + theta;
+		q = gamma * 2.0 - dp + dx;
+		r = p / q;
 		stpstx = stx - stp;
-        stpc = stp + r * stpstx;
-        stpq = stp + dp / (dp - dx) * stpstx;
-        if( fabs(stpc - stp) > fabs(stpq - stp) )
-        {
-            stpf = stpc;
-        }
-        else
-        {
-            stpf = stpq;
-        }
-        brackt = true;
-    }
-    else if( fabs(dp) < fabs(dx) )
-    {
-        theta = 3.0 * (fx-fp) / (stp - stx) + dx + dp;
-        s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
-        gamma = s * sqrt(fmaxf(0.0, sqrt(theta / s) - dx * dp / (s * s)));
-        if( stp>stx )
-        {
-            gamma = -gamma;
-        }
-        p = gamma - dp + theta;
-        q = gamma + (dx - dp) + gamma;
-        r = p / q;
-        if( r < 0.0 && gamma != 0.0 )
-        {
-            stpc = stp + r * (stx-stp);
-        }
-        else if( stp > stx )
+		stpc = stp + r * stpstx;
+		stpq = stp + dp / (dp - dx) * stpstx;
+		if( fabs(stpc - stp) > fabs(stpq - stp) )
+		{
+			stpf = stpc;
+		}
+		else
+		{
+			stpf = stpq;
+		}
+		brackt = true;
+	}
+	else if( fabs(dp) < fabs(dx) )
+	{
+		theta = 3.0 * (fx-fp) / (stp - stx) + dx + dp;
+		s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
+		gamma = s * sqrt(fmaxf(0.0, (theta * theta) / (s * s) - dx * dp / (s * s)));
+		if( stp>stx )
+		{
+			gamma = -gamma;
+		}
+		p = gamma - dp + theta;
+		q = gamma + (dx - dp) + gamma;
+		r = p / q;
+		if( r < 0.0 && gamma != 0.0 )
+		{
+			stpc = stp + r * (stx-stp);
+		}
+		else if( stp > stx )
 		{
 			stpc = stpmax;
 		}
@@ -1416,7 +1417,7 @@ inline void lbfgsbdcstep(real& stx,
 		{
 			stpc = stpmin;
 		}
-        stpq = stp + dp / (dp - dx) * (stx - stp);
+		stpq = stp + dp / (dp - dx) * (stx - stp);
 		if( fabs(stpc - stp) < fabs(stpq - stp) )
 		{
 			stpf = stpc;
@@ -1425,20 +1426,20 @@ inline void lbfgsbdcstep(real& stx,
 		{
 			stpf = stpq;
 		}
-        if( brackt )
-        {
+		if( brackt )
+		{
 			stpf = fmaxf(stp + 0.666666666666667 * (sty - stp), stpf);
-        }
-        else
-        {
-            stpf = fmaxf(stpmax, stpf);
-        }
-    }
-    else if( brackt )
+		}
+		else
+		{
+			stpf = fmaxf(stpmax, stpf);
+		}
+	}
+	else if( brackt )
 	{
 		theta = 3.0 * (fp - fy) / (sty - stp) + dy + dp;
 		s = fmaxf(fabs(theta), fmaxf(fabs(dy), fabs(dp)));
-		gamma = s * sqrt(sqrt(theta / s) - dy / s * (dp / s));
+		gamma = s * sqrt((theta * theta) / (s * s) - dy / s * (dp / s));
 		if( stp > sty )
 		{
 			gamma = -gamma;
@@ -1457,26 +1458,26 @@ inline void lbfgsbdcstep(real& stx,
 	{
 		stpf = stpmin;
 	}
-    
-    if( fp > fx )
-    {
-        sty = stp;
-        fy = fp;
-        dy = dp;
-    }
-    else
-    {
-        if( sgnd < 0 )
-        {
-            sty = stx;
-            fy = fx;
-            dy = dx;
-        }
-        stx = stp;
-        fx = fp;
-        dx = dp;
-    }
-    stp = stpf;
+
+	if( fp > fx )
+	{
+		sty = stp;
+		fy = fp;
+		dy = dp;
+	}
+	else
+	{
+		if( sgnd < 0 )
+		{
+			sty = stx;
+			fy = fx;
+			dy = dx;
+		}
+		stx = stp;
+		fx = fp;
+		dx = dp;
+	}
+	stp = stpf;
 }
 
 inline bool lbfgsbdpofa(real* a, const int& n, const int& iPitch)
