@@ -50,6 +50,7 @@ namespace lbfgsbcuda {
 		__global__
 		void kernel1(
 		int nfree,
+		const int* index,
 		const int col,
 		const int head,
 		const int m,
@@ -78,11 +79,13 @@ namespace lbfgsbcuda {
 				a[0][tidx] = wa[tidx];
 				a[1][tidx] = theta * wa[col + tidx];
 			}
-
+			int k = 0;
 			if(i < nfree && tidx < col) {
 				const int pointr = Modular((head + tidx), m);
+				k = index[i];
 				__syncthreads();
-				mySum = wy[i * iPitch + pointr] * a[0][tidx] + ws[i * iPitch + pointr] * a[1][tidx];
+				
+				mySum = wy[k * iPitch + pointr] * a[0][tidx] + ws[k * iPitch + pointr] * a[1][tidx];
 			} else
 				mySum = 0;
 			
@@ -98,7 +101,7 @@ namespace lbfgsbcuda {
 			}
 
 			if(tidx == 0 && i < nfree) {
-				r[i] = -theta * (z[i] - x[i]) - g[i] + mySum;
+				r[i] = -theta * (z[k] - x[k]) - g[k] + mySum;
 			}
 		}
 
@@ -115,6 +118,7 @@ namespace lbfgsbcuda {
 
 		void prog1(
 			const int nfree,
+			const int* index,
 			const int col,
 			const int head,
 			const int m,
@@ -133,19 +137,19 @@ namespace lbfgsbcuda {
 			if(col > 4) {
 				int nblocky = 512 / 8;
 				kernel1<8><<<dim3(iDivUp(nfree, nblocky)), dim3(8, nblocky), 0, stream>>>
-					(nfree, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
+					(nfree, index, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
 			} else if(col > 2) {
 				int nblocky = 512 / 4;
 				kernel1<4><<<dim3(iDivUp(nfree, nblocky)), dim3(4, nblocky), 0, stream>>>
-					(nfree, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
+					(nfree, index, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
 			} else if(col > 1) {
 				int nblocky = 512 / 2;
 				kernel1<2><<<dim3(iDivUp(nfree, nblocky)), dim3(2, nblocky), 0, stream>>>
-					(nfree, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
+					(nfree, index, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
 			} else if(col == 1){
 				int nblocky = 512 / 1;
 				kernel1<1><<<dim3(iDivUp(nfree, nblocky)), dim3(1, nblocky), 0, stream>>>
-					(nfree, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
+					(nfree, index, col, head, m, iPitch, wa, wy, ws, theta, z, x, g, r);
 			}
 		}
 

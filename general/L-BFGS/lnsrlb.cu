@@ -154,7 +154,6 @@ namespace lbfgsbcuda {
 
 			real u = stp * d[i];
 			x[i] = t[i] + u;
-			d[i] = u;
 		}
 
 		void prog0(

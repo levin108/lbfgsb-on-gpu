@@ -36,11 +36,15 @@ Contributors:
 #include <fstream>
 #include "lbfgsb.h"
 
+//#define USE_STREAM
+
 inline void lbfgsbactive(const int& n,
 	const real* l,
 	const real* u,
 	const int* nbd,
-	real* x);
+	real* x,
+	int* iwhere
+	);
 inline void lbfgsbbmv(const int& m,
 	const real* sy,
 	real* wt,
@@ -75,6 +79,8 @@ inline void lbfgsbcauchy(const int& n,
 	const real& sbgnrm,
 	real* buf_s_r,
 	real* buf_array_p,
+	int* iwhere,
+	const int& iPitch_normal,
 	const cudaStream_t* streamPool,
 	int& info);
 inline void lbfgsbcmprlb(const int& n,
@@ -88,9 +94,12 @@ inline void lbfgsbcmprlb(const int& n,
      const real* z,
      real* r,
      real* wa,
+     const int* index,
      const real& theta,
      const int& col,
      const int& head,
+	 const int& nfree,
+	 const bool& cnstnd,
      int& info,
      real* workvec,
      real* workvec2,
@@ -98,6 +107,11 @@ inline void lbfgsbcmprlb(const int& n,
 	 const cudaStream_t& stream
 	 );
 inline void lbfgsbformk(const int& n,
+    const int& nsub,
+	const int* ind,
+	const int& nenter,
+	const int& ileave,
+	const int* indx2,
 	const int& iupdat,
 	const bool& updatd,
 	real* wn,
@@ -113,8 +127,11 @@ inline void lbfgsbformk(const int& n,
 	real* workvec,
 	real* workmat,
 	real* buf_array_p,
+	real* buf_array_super,
 	const int& iPitch_wn,
 	const int& iPitch_ws,
+	const int& iPitch_super,
+	const int& iPitch_normal,
 	const cudaStream_t* streamPool
 	);
 inline void lbfgsbformt(const int& m,
@@ -192,6 +209,7 @@ inline void lbfgsbmatupd(const int& n,
 	const real& dtd,
 	const int& iPitch,
 	real* buf_array_p,
+	const int& iPitch_normal,
 	const cudaStream_t* streamPool
 	);
 inline void lbfgsbprojgr(const int& n,
@@ -207,14 +225,19 @@ inline void lbfgsbprojgr(const int& n,
 	);
 inline void lbfgsbsubsm(const int& n,
 	const int& m,
+	const int& nsub,
+	const int* ind,
 	const real* l,
 	const real* u,
 	const int* nbd,
 	real* x,
 	real* d,
+	real* xp,
 	const real* ws,
 	const real* wy,
 	const real& theta,
+	const real* xx,
+	const real* gg,
 	const int& col,
 	const int& head,
 	real* wv,
@@ -225,6 +248,7 @@ inline void lbfgsbsubsm(const int& n,
 	real* buf_array_p,
 	real* buf_s_r,
 	int* bufi_s_r,
+	const int& iPitch_normal,
 	const cudaStream_t& stream
 	);
 inline void lbfgsbdcsrch(const real& f,
@@ -352,7 +376,7 @@ and it isn't necessary to allocate it in the FuncGrad subroutine.
 	Restructured by Yun Fei.
 *************************************************************************/
 void lbfgsbminimize(const int& n,
-     const int& m,
+     const int& m0,
      real* x,
      const real& epsg,
      const real& epsf,
@@ -369,6 +393,7 @@ void lbfgsbminimize(const int& n,
     real* xold;
     real* xdiff;
     real* z;
+    real* xp;
     real* zb;
     real* r;
     real* d;
@@ -389,8 +414,17 @@ void lbfgsbminimize(const int& n,
 	real* snd;
 	real* buf_array_p;
 	real* buf_array_p1;
+	real* buf_array_super;
 
     int* bufi_n_r;
+	int* iwhere;
+	int* index;
+	int* iorder;
+
+	int* temp_ind1;
+	int* temp_ind2;
+	int* temp_ind3;
+	int* temp_ind4;
 
     int csave;
     int task;
@@ -406,11 +440,15 @@ void lbfgsbminimize(const int& n,
     int nfgv;
     int internalinfo;
     int ifun;
+	int nfree;
+	int nenter;
+	int ileave;
+
     real theta;
     real fold;
     real dr;
     real rr;
-    real dnrm;
+    real dnrm; 
     real xstep;
     real sbgnrm; 
     real ddum;
@@ -421,20 +459,31 @@ void lbfgsbminimize(const int& n,
     real stpmx;
     real tf;
 
+	int m = __min(m0, 8);
+
 	memAlloc<real>(&workvec, m);
 	memAlloc<real>(&workvec2, 2 * m);
 	memAlloc<real>(&g, n);
 	memAlloc<real>(&xold, n);
 	memAlloc<real>(&xdiff, n);
 	memAlloc<real>(&z, n);
+	memAlloc<real>(&xp, n);
 	memAlloc<real>(&zb, n);
 	memAlloc<real>(&r, n);
 	memAlloc<real>(&d, n);
 	memAlloc<real>(&t, n);
 	memAlloc<real>(&wa, 8 * m);
-	memAlloc<real>(&buf_n_r, n);
-	memAlloc<real>(&buf_array_p, m * n * 2);	
-	memAlloc<real>(&buf_array_p1, m * n * 2);	
+
+	const int superpitch = lbfgsbcuda::iDivUp(n, ((1 << lbfgsbcuda::log2Up(n)) - 1) / 2);
+	const int normalpitch = superpitch;
+	memAlloc<real>(&buf_n_r, superpitch);	
+	memAlloc<real>(&buf_array_p, m * normalpitch * 2);
+#ifdef USE_STREAM
+	memAlloc<real>(&buf_array_p1, m * normalpitch * 2);	
+#else
+	buf_array_p1 = buf_array_p;
+#endif
+	memAlloc<real>(&buf_array_super, m * m * superpitch);
 
 	size_t pitch0 = m;
 	memAllocPitch<real>(&ws, m, n, &pitch0);
@@ -449,7 +498,15 @@ void lbfgsbminimize(const int& n,
 	memAllocPitch<real>(&wn, m * 2, m * 2, &pitch1);
 	memAllocPitch<real>(&snd, m * 2, m * 2, NULL);
 	
-	memAlloc<int>(&bufi_n_r, n);
+	memAlloc<int>(&bufi_n_r, superpitch);
+	memAlloc<int>(&iwhere, n);
+	memAlloc<int>(&index, n);
+	memAlloc<int>(&iorder, n);
+
+	memAlloc<int>(&temp_ind1, n);
+	memAlloc<int>(&temp_ind2, n);
+	memAlloc<int>(&temp_ind3, n);
+	memAlloc<int>(&temp_ind4, n);
 
 	real* sbgnrm_h;
 	real* sbgnrm_d;
@@ -466,10 +523,10 @@ void lbfgsbminimize(const int& n,
 
 	const static int MAX_STREAM = 10;
 
-
-	for(int i = 0; i < MAX_STREAM; i++)
-		cutilSafeCall(cudaStreamCreate(streamPool + i));
-
+#ifdef USE_STREAM
+ 	for(int i = 0; i < MAX_STREAM; i++)
+ 		cutilSafeCall(cudaStreamCreate(streamPool + i));
+#endif
     col = 0;
     head = 0; 
     theta = 1;
@@ -480,11 +537,13 @@ void lbfgsbminimize(const int& n,
     nint = 0;
     internalinfo = 0;
 	task = 0;
+	nfree = n;
 
 	lbfgsbcuda::CheckBuffer(x, n, n);
-    lbfgsbactive(n, l, u, nbd, x);
+    lbfgsbactive(n, l, u, nbd, x, iwhere);
 	lbfgsbcuda::CheckBuffer(x, n, n);
 	memCopyAsync(xold, x, n * sizeof(real), cudaMemcpyDeviceToDevice);
+	memCopyAsync(xp, x, n * sizeof(real), cudaMemcpyDeviceToDevice);
     funcgrad(x, f, g, NULL);
 
     nfgv = 1;
@@ -499,27 +558,10 @@ void lbfgsbminimize(const int& n,
     while(true)
     {
 		//Streaming Start
-
-		if( col!=0 && updatd )
-		{
-			lbfgsbformk(n, iupdat, updatd, wn, snd, m, ws, wy, sy,
-					theta, col, head, internalinfo, workvec, workmat, buf_array_p, pitch1,
-					pitch0, streamPool);
-			if( internalinfo!=0 )
-			{
-				internalinfo = 0;
-				col = 0;
-				head = 0;
-				theta = 1;
-				iupdat = 0;
-				updatd = false;
-				continue;
-			}
-		}
-
+/*		cutilSafeCall(cudaDeviceSynchronize());*/
 		lbfgsbcauchy(n, x, l, u, nbd, g,
 			t, z, zb, m, wy, ws, sy, pitch0, wt,
-			theta, col, head, wa, wa + 2 * m, wa + 6 * m, nint, sbgnrm, buf_n_r, buf_array_p1, streamPool + 3, 
+			theta, col, head, wa, wa + 2 * m, wa + 6 * m, nint, sbgnrm, buf_n_r, buf_array_p1, iwhere, normalpitch, streamPool + 3, 
 			internalinfo);
 		if( internalinfo!=0 )
 		{
@@ -532,13 +574,30 @@ void lbfgsbminimize(const int& n,
 			continue;
 		}
 
+		lbfgsbcuda::freev::prog0(n, nfree, index, nenter, ileave, iorder, iwhere, wrk, updatd, true, iter, temp_ind1, temp_ind2, temp_ind3, temp_ind4);
+		//printf("nf/ne/il: %d/%d/%d\n", nfree, nenter, ileave);
+/*		cudaDeviceSynchronize();*/
 
-		cudaDeviceSynchronize();
+		if(col != 0 && nfree != 0) {
+			if( wrk )
+			{
+				lbfgsbformk(n, nfree, index, nenter, ileave, iorder, iupdat, updatd, wn, snd, m, ws, wy, sy,
+					theta, col, head, internalinfo, workvec, workmat, buf_array_p, buf_array_super, pitch1,
+					pitch0, superpitch, normalpitch, streamPool);
+				if( internalinfo!=0 )
+				{
+					internalinfo = 0;
+					col = 0;
+					head = 0;
+					theta = 1;
+					iupdat = 0;
+					updatd = false;
+					continue;
+				}
+			}
 
-        if( col!=0 )
-        {
             lbfgsbcmprlb(n, m, x, g, ws, wy, sy,
-				wt, zb, r, wa, theta, col, head, 
+				wt, zb, r, wa, index, theta, col, head, nfree, true,
 				internalinfo, workvec, workvec2, pitch0, streamPool[0]);
 			if( internalinfo!=0 )
 			{
@@ -551,9 +610,9 @@ void lbfgsbminimize(const int& n,
 				continue;
 			}
 
-            lbfgsbsubsm(n, m, l, u, nbd, z, r, ws, wy,
-				theta, col, head, wa, wn, internalinfo, 
-				pitch1, pitch0, buf_array_p, buf_n_r, bufi_n_r, streamPool[0]);
+            lbfgsbsubsm(n, m, nfree, index, l, u, nbd, z, r, xp, ws, wy,
+				theta, x, g, col, head, wa, wn, internalinfo, 
+				pitch1, pitch0, buf_array_p, buf_n_r, bufi_n_r, normalpitch, streamPool[0]);
 
             if( internalinfo!=0 )
             {
@@ -567,6 +626,7 @@ void lbfgsbminimize(const int& n,
             }
         }
 		lbfgsbcuda::minimize::vsub_v(n, z, x, d);
+		lbfgsbcuda::CheckBuffer(d, n, n);
         task = 0;
         while(true)
         {
@@ -575,13 +635,12 @@ void lbfgsbminimize(const int& n,
 				fold, gd, gdold, g, d, r, t, z, 
 				stp, dnrm, dtd, xstep, stpmx, iter, ifun, iback, nfgv, 
 				internalinfo, task, csave, isave2, dsave13, buf_n_r, streamPool);
-			lbfgsbcuda::CheckBuffer(x, n, n);
             if( internalinfo!=0||iback>=20||task!=1 )
             {
                 break;
             }
             funcgrad(x, f, g, streamPool[1]);
-
+			lbfgsbcuda::CheckBuffer(g, n, n);
        }
         iter = iter + 1;
 		// finish debug
@@ -608,7 +667,7 @@ void lbfgsbminimize(const int& n,
 			info = 5;
 			break;
 		}
-
+		cutilSafeCall(cudaDeviceSynchronize());
 		if( stp == 1 )
 		{
 			dr = gd-gdold;
@@ -617,6 +676,7 @@ void lbfgsbminimize(const int& n,
 		else
 		{
 			dr = (gd - gdold) * stp;
+			lbfgsbcuda::minimize::vmul_v(n, d, stp, streamPool[1]);
 			ddum = -gdold * stp;
 		}
 		if( tf <= epsx2 )
@@ -637,12 +697,14 @@ void lbfgsbminimize(const int& n,
 		else
 		{
 			updatd = true;
-			if(iupdat < m)
-				iupdat++;
+// 			if(iupdat >= m)
+// 				printf(" ");
+			iupdat++;
+/*			printf("iupd: %d\n", iupdat);*/
 
 			lbfgsbmatupd(n, m, ws, wy, sy, ss, d, r, itail, 
 				iupdat, col, head, theta, rr, dr, stp, dtd, pitch0,
-				buf_array_p, streamPool);
+				buf_array_p, normalpitch, streamPool);
 			lbfgsbformt(m, wt, sy, ss, col, theta, internalinfo, pitch0, streamPool);
 		}
 
@@ -672,9 +734,10 @@ void lbfgsbminimize(const int& n,
 		}
     }
 
-
+#ifdef USE_STREAM
 	for(int i = 0; i < MAX_STREAM; i++)
 		cudaStreamDestroy(streamPool[i]);
+#endif
 
 	memFree(workvec);
 	memFree(workvec2);
@@ -682,12 +745,20 @@ void lbfgsbminimize(const int& n,
 	memFree(xold);
 	memFree(xdiff);
 	memFree(z);
+	memFree(xp);
 	memFree(zb);
 	memFree(r);
 	memFree(d);
 	memFree(t);
 	memFree(wa);
 	memFree(buf_n_r);
+	memFree(index);
+	memFree(iorder);
+	memFree(iwhere);
+	memFree(temp_ind1);
+	memFree(temp_ind2);
+	memFree(temp_ind3);
+	memFree(temp_ind4);
 
 	//pitch = m
 	memFree(ws);
@@ -702,7 +773,10 @@ void lbfgsbminimize(const int& n,
 	memFree(wn);
 	memFree(snd);
 	memFree(buf_array_p);	
+#ifdef USE_STREAM
 	memFree(buf_array_p1);	
+#endif
+	memFree(buf_array_super);
 
 	memFree(bufi_n_r);
 	memFreeHost(sbgnrm_h);
@@ -715,11 +789,13 @@ inline void lbfgsbactive(const int& n,
 	const real* l,
 	const real* u,
 	const int* nbd,
-	real* x)
+	real* x,
+	int* iwhere
+	)
 {
 
 	lbfgsbcuda::active::prog0(n, l, u, nbd,
-		x);
+		x, iwhere);
 }
 
 inline void lbfgsbbmv(const int& m,
@@ -771,6 +847,8 @@ inline void lbfgsbcauchy(const int& n,
      const real& sbgnrm,
 	 real* buf_s_r,
 	 real* buf_array_p,
+	 int* iwhere,
+	 const int& iPitch_normal,
 	 const cudaStream_t* streamPool,
      int& info)
 {
@@ -781,12 +859,10 @@ inline void lbfgsbcauchy(const int& n,
 	lbfgsbcuda::cauchy::prog0(
 		n, x, l, u, nbd, g, t, xcp, xcpb, m, wy, ws, sy,
 		iPitch, wt, theta, col, head, p, c, v, nint, sbgnrm,
-		buf_s_r, buf_array_p, streamPool);
+		buf_s_r, buf_array_p, iwhere, iPitch_normal, streamPool);
 	lbfgsbcuda::CheckBuffer(p, m, 2 * m);
 	lbfgsbcuda::CheckBuffer(c, m, 2 * m);
 	lbfgsbcuda::CheckBuffer(v, m, 2 * m);
-
-	lbfgsbbmv(m, sy, wt, col, iPitch, c, p, streamPool[1], info);
 }
 
 
@@ -801,9 +877,12 @@ inline void lbfgsbcmprlb(const int& n,
      const real* z,
      real* r,
      real* wa,
+     const int* index,
      const real& theta,
      const int& col,
      const int& head,
+	 const int& nfree,
+	 const bool& cnstnd,
      int& info,
      real* workvec,
      real* workvec2,
@@ -814,13 +893,20 @@ inline void lbfgsbcmprlb(const int& n,
 
 	lbfgsbcuda::CheckBuffer(wy, iPitch, iPitch * n);
 	lbfgsbcuda::CheckBuffer(ws, iPitch, iPitch * n);
+
+	lbfgsbbmv(m, sy, wt, col, iPitch, wa + 2 * m, wa, stream, info);
 	lbfgsbcuda::cmprlb::prog1(
-		n, col, head, m, iPitch, wa,
+		nfree, index, col, head, m, iPitch, wa,
 		wy, ws, theta, z, x, g, r, stream);
 	lbfgsbcuda::CheckBuffer(r, n, n);
 }
 
 inline void lbfgsbformk(const int& n,
+	const int& nsub,
+	const int* ind,
+	const int& nenter,
+	const int& ileave,
+	const int* indx2,
      const int& iupdat,
      const bool& updatd,
      real* wn,
@@ -836,36 +922,62 @@ inline void lbfgsbformk(const int& n,
      real* workvec,
      real* workmat,
 	 real* buf_array_p,
+	 real* buf_array_super,
 	 const int& iPitch_wn,
 	 const int& iPitch_ws,
+	 const int& iPitch_super,
+	 const int& iPitch_normal,
 	 const cudaStream_t* streamPool
 	 )
 {
-	int ipntr = head + col - 1;
-	if( ipntr >= m )
-	{
-		ipntr = ipntr - m;
+	int upcl = col;
+	if(updatd) {
+		if(iupdat>m) {
+			lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
+			lbfgsbcuda::formk::prog0(wn1, m, iPitch_wn, streamPool);
+			lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
+		}
+		
+		int ipntr = head + col - 1;
+		if( ipntr >= m )
+		{
+			ipntr = ipntr - m;
+		}
+
+		lbfgsbcuda::formk::prog1(
+			n, nsub, ipntr, ind, wn1, buf_array_p, ws, wy, head, m,
+			col, iPitch_ws, iPitch_wn, iPitch_normal, streamPool);
+
+		if(n == nsub)
+			lbfgsbcuda::formk::prog2(wn1, col, m, iPitch_wn, streamPool);
+
+		lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
+
+		int jy = col - 1;
+		int jpntr = head + col - 1;
+		if( jpntr >= m )
+		{
+			jpntr = jpntr - m;
+		}
+
+		lbfgsbcuda::formk::prog3(ind, jpntr, head, m, col, n, nsub, iPitch_ws, iPitch_wn,
+			jy, ws, wy, buf_array_p, wn1, iPitch_normal, streamPool);
+		lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
+		upcl = col - 1;
+	} else {
+		upcl = col;
 	}
 
-	lbfgsbcuda::formk::prog1(
-		n, ipntr, wn1, buf_array_p, wy, head, m,
-		col, iPitch_ws, iPitch_wn, streamPool);
-
-	lbfgsbcuda::formk::prog2(wn1, col, m, iPitch_wn, streamPool);
-
-	lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
-
-	int jy = col - 1;
-	int jpntr = head + col - 1;
-	if( jpntr >= m )
-	{
-		jpntr = jpntr - m;
+	if(upcl > 0) {
+		lbfgsbcuda::formk::prog31(indx2, head, m, upcl, col, nenter, ileave, n, iPitch_ws, iPitch_wn, wy, buf_array_super, wn1, 1.0, iPitch_super, streamPool);
+		lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
+	
+		lbfgsbcuda::formk::prog31(indx2, head, m, upcl, col, nenter, ileave, n, iPitch_ws, iPitch_wn, ws, buf_array_super, wn1 + m * iPitch_wn + m, -1.0, iPitch_super, streamPool);
+		lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
+	
+		lbfgsbcuda::formk::prog32(indx2, head, m, upcl, nenter, ileave, n, iPitch_ws, iPitch_wn, wy, ws, buf_array_super, wn1, iPitch_super, streamPool);
+		lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
 	}
-
-	lbfgsbcuda::formk::prog3(jpntr, head, m, col, n, iPitch_ws, iPitch_wn,
-		jy, ws, wy, buf_array_p, wn1, streamPool);
-	lbfgsbcuda::CheckBuffer(wn1, iPitch_wn, iPitch_wn * m * 2);
-
 	lbfgsbcuda::formk::prog4(col, iPitch_wn, iPitch_ws, m, wn1, theta, sy, wn, streamPool);
  	lbfgsbcuda::CheckBuffer(wn, iPitch_wn, iPitch_wn * m * 2);
 
@@ -1003,7 +1115,7 @@ inline void lbfgsblnsrlb(const int& n,
 			return;
 		}
 	}
-	lbfgsbdcsrch(f, gd, stp, ftol, gtol, xtol, machineepsilon, stpmx, csave, isave, dsave);
+	lbfgsbdcsrch(f, gd, stp, ftol, gtol, xtol, real(0), stpmx, csave, isave, dsave);
 	if( csave!=3 )
 	{
 		task = 1;
@@ -1072,23 +1184,31 @@ inline void lbfgsbmatupd(const int& n,
 	const real& dtd,
 	const int& iPitch,
 	real* buf_array_p,
+	const int& iPitch_normal,
 	const cudaStream_t* streamPool
 	)
 {
-	col = iupdat;
-	itail = Modular((head + iupdat - 1), m);
-
+	if( iupdat<=m )
+	{
+		col = iupdat;
+		itail = Modular((head + iupdat - 1), m);
+	}
+	else
+	{
+		itail = Modular(itail + 1, m);
+		head = Modular(head + 1, m);
+	}	
 	theta = rr / dr;
 
 	lbfgsbcuda::matupd::prog0(
 		n, m, wy, sy, r, d, itail, iupdat,
-		col, head, dr, iPitch, iPitch, 1, buf_array_p, streamPool[1]		
+		col, head, dr, iPitch, iPitch, 1, buf_array_p, iPitch_normal, streamPool[1]		
 	);
 
 	lbfgsbcuda::matupd::prog0(
 		n, m, ws, ss, d, d, itail, iupdat,
 		col, head, stp * stp * dtd, iPitch,
-		1, iPitch, buf_array_p + n / 2, streamPool[2]
+		1, iPitch, buf_array_p + n / 2, iPitch_normal, streamPool[2]
 	);
 }
 
@@ -1111,14 +1231,19 @@ inline void lbfgsbprojgr(const int& n,
 
 inline void lbfgsbsubsm(const int& n,
      const int& m,
+     const int& nsub,
+     const int* ind,
      const real* l,
      const real* u,
      const int* nbd,
      real* x,
      real* d,
+	 real* xp,
      const real* ws,
      const real* wy,
      const real& theta,
+	 const real* xx,
+	 const real* gg,
      const int& col,
      const int& head,
      real* wv,
@@ -1129,12 +1254,13 @@ inline void lbfgsbsubsm(const int& n,
 	 real* buf_array_p,
 	 real* buf_s_r,
 	 int* bufi_s_r,
+	 const int& iPitch_normal,
 	 const cudaStream_t& stream
 	 )
 {
 
-	lbfgsbcuda::subsm::prog0(n, head, m, col, iPitch_ws, 
-		buf_array_p, wy, ws, d, wv, theta, stream);
+	lbfgsbcuda::subsm::prog0(nsub, ind, head, m, col, iPitch_ws, 
+		buf_array_p, wy, ws, d, wv, theta, iPitch_normal, stream);
 
 	lbfgsbcuda::CheckBuffer(wv, col * 2, col * 2);
 	lbfgsbcuda::CheckBuffer(wn, iPitch_wn, iPitch_wn * m);
@@ -1142,12 +1268,29 @@ inline void lbfgsbsubsm(const int& n,
 	lbfgsbcuda::CheckBuffer(wv, col * 2, col * 2);
 
 	lbfgsbcuda::CheckBuffer(d, n, n);
-	lbfgsbcuda::subsm::prog2(n, col, head, m, iPitch_ws, wv, wy, ws, theta, d, stream);
+	lbfgsbcuda::subsm::prog2(nsub, ind, col, head, m, iPitch_ws, wv, wy, ws, theta, d, stream);
 	lbfgsbcuda::CheckBuffer(d, n, n);
 
-	lbfgsbcuda::subsm::prog3(n, d, nbd, buf_s_r, bufi_s_r, x, u, l, stream);
-	lbfgsbcuda::CheckBuffer(x, n, n);
-	lbfgsbcuda::CheckBuffer(d, n, n);
+	cutilSafeCall(cudaMemcpyAsync(xp, x, n * sizeof(real), cudaMemcpyDeviceToDevice, stream));
+
+	real* pddp = NULL;
+	real* pddp_dev = NULL;
+	cudaMallocHost(&pddp, sizeof(real), cudaHostAllocMapped);
+	cudaHostGetDevicePointer(&pddp_dev, pddp, 0);	
+
+	lbfgsbcuda::subsm::prog21(n, nsub, ind, d, x, l, u, nbd, xx, gg, buf_s_r, pddp_dev, stream);
+
+	cutilSafeCall(cudaStreamSynchronize(stream));
+	
+	if(*pddp > 0) {
+		cutilSafeCall(cudaMemcpyAsync(x, xp, n * sizeof(real), cudaMemcpyDeviceToDevice, stream));
+
+		lbfgsbcuda::subsm::prog3(nsub, ind, d, nbd, buf_s_r, bufi_s_r, x, u, l, stream);
+		lbfgsbcuda::CheckBuffer(x, n, n);
+		lbfgsbcuda::CheckBuffer(d, n, n);
+	}
+
+	cudaFreeHost(pddp);
 }
 
 
@@ -1342,74 +1485,74 @@ inline void lbfgsbdcstep(real& stx,
     register real theta;
 	register real stpstx;
 
-	sgnd = dp * dx / fabs(dx);
-	if( fp > fx )
-	{
-		theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
-		s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
-		gamma = s * sqrt((theta * theta) / (s * s) - dx / s * (dp / s));
-		if( stp < stx )
-		{
-			gamma = -gamma;
-		}
-		p = gamma - dx + theta;
-		q = gamma - dx + gamma + dp;
-		r = p / q;
+    sgnd = dp * dx / fabs(dx);
+    if( fp > fx )
+    {
+        theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
+        s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
+        gamma = s * sqrt((theta * theta) / (s * s) - dx / s * (dp / s));
+        if( stp < stx )
+        {
+            gamma = -gamma;
+        }
+        p = gamma - dx + theta;
+        q = gamma - dx + gamma + dp;
+        r = p / q;
 		stpstx = stp - stx;
-		stpc = stx + r * stpstx;
-		stpq = stx + dx / ((fx - fp) / stpstx + dx) * 0.5 * stpstx;
-		if( fabs(stpc - stx) < fabs(stpq - stx) )
-		{
-			stpf = stpc;
-		}
-		else
-		{
-			stpf = stpc + (stpq - stpc) * 0.5;
-		}
-		brackt = true;
-	}
-	else if( sgnd < 0 )
-	{
-		theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
-		s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
-		gamma = s * sqrt((theta * theta) / (s * s) - dx * dp / (s * s));
-		if( stp > stx )
-		{
-			gamma = -gamma;
-		}
-		p = gamma - dp + theta;
-		q = gamma * 2.0 - dp + dx;
-		r = p / q;
+        stpc = stx + r * stpstx;
+        stpq = stx + dx / ((fx - fp) / stpstx + dx) * 0.5 * stpstx;
+        if( fabs(stpc - stx) < fabs(stpq - stx) )
+        {
+            stpf = stpc;
+        }
+        else
+        {
+            stpf = stpc + (stpq - stpc) * 0.5;
+        }
+        brackt = true;
+    }
+    else if( sgnd < 0 )
+    {
+        theta = 3.0 * (fx - fp) / (stp - stx) + dx + dp;
+        s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
+        gamma = s * sqrt((theta * theta) / (s * s) - dx * dp / (s * s));
+        if( stp > stx )
+        {
+            gamma = -gamma;
+        }
+        p = gamma - dp + theta;
+        q = gamma * 2.0 - dp + dx;
+        r = p / q;
 		stpstx = stx - stp;
-		stpc = stp + r * stpstx;
-		stpq = stp + dp / (dp - dx) * stpstx;
-		if( fabs(stpc - stp) > fabs(stpq - stp) )
-		{
-			stpf = stpc;
-		}
-		else
-		{
-			stpf = stpq;
-		}
-		brackt = true;
-	}
-	else if( fabs(dp) < fabs(dx) )
-	{
-		theta = 3.0 * (fx-fp) / (stp - stx) + dx + dp;
-		s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
-		gamma = s * sqrt(fmaxf(0.0, (theta * theta) / (s * s) - dx * dp / (s * s)));
-		if( stp>stx )
-		{
-			gamma = -gamma;
-		}
-		p = gamma - dp + theta;
-		q = gamma + (dx - dp) + gamma;
-		r = p / q;
-		if( r < 0.0 && gamma != 0.0 )
-		{
-			stpc = stp + r * (stx-stp);
-		}
-		else if( stp > stx )
+        stpc = stp + r * stpstx;
+        stpq = stp + dp / (dp - dx) * stpstx;
+        if( fabs(stpc - stp) > fabs(stpq - stp) )
+        {
+            stpf = stpc;
+        }
+        else
+        {
+            stpf = stpq;
+        }
+        brackt = true;
+    }
+    else if( fabs(dp) < fabs(dx) )
+    {
+        theta = 3.0 * (fx-fp) / (stp - stx) + dx + dp;
+        s = fmaxf(fabs(theta), fmaxf(fabs(dx), fabs(dp)));
+        gamma = s * sqrt(fmaxf(0.0, (theta * theta) / (s * s) - dx * dp / (s * s)));
+        if( stp>stx )
+        {
+            gamma = -gamma;
+        }
+        p = gamma - dp + theta;
+        q = gamma + (dx - dp) + gamma;
+        r = p / q;
+        if( r < 0.0 && gamma != 0.0 )
+        {
+            stpc = stp + r * (stx-stp);
+        }
+        else if( stp > stx )
 		{
 			stpc = stpmax;
 		}
@@ -1417,7 +1560,7 @@ inline void lbfgsbdcstep(real& stx,
 		{
 			stpc = stpmin;
 		}
-		stpq = stp + dp / (dp - dx) * (stx - stp);
+        stpq = stp + dp / (dp - dx) * (stx - stp);
 		if( fabs(stpc - stp) < fabs(stpq - stp) )
 		{
 			stpf = stpc;
@@ -1426,16 +1569,16 @@ inline void lbfgsbdcstep(real& stx,
 		{
 			stpf = stpq;
 		}
-		if( brackt )
-		{
+        if( brackt )
+        {
 			stpf = fmaxf(stp + 0.666666666666667 * (sty - stp), stpf);
-		}
-		else
-		{
-			stpf = fmaxf(stpmax, stpf);
-		}
-	}
-	else if( brackt )
+        }
+        else
+        {
+            stpf = fmaxf(stpmax, stpf);
+        }
+    }
+    else if( brackt )
 	{
 		theta = 3.0 * (fp - fy) / (sty - stp) + dy + dp;
 		s = fmaxf(fabs(theta), fmaxf(fabs(dy), fabs(dp)));
@@ -1458,26 +1601,26 @@ inline void lbfgsbdcstep(real& stx,
 	{
 		stpf = stpmin;
 	}
-
-	if( fp > fx )
-	{
-		sty = stp;
-		fy = fp;
-		dy = dp;
-	}
-	else
-	{
-		if( sgnd < 0 )
-		{
-			sty = stx;
-			fy = fx;
-			dy = dx;
-		}
-		stx = stp;
-		fx = fp;
-		dx = dp;
-	}
-	stp = stpf;
+    
+    if( fp > fx )
+    {
+        sty = stp;
+        fy = fp;
+        dy = dp;
+    }
+    else
+    {
+        if( sgnd < 0 )
+        {
+            sty = stx;
+            fy = fx;
+            dy = dx;
+        }
+        stx = stp;
+        fx = fp;
+        dx = dp;
+    }
+    stp = stpf;
 }
 
 inline bool lbfgsbdpofa(real* a, const int& n, const int& iPitch)

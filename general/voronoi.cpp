@@ -456,7 +456,7 @@ real BFGSOptimization()
 	printf("Start optimization...");
 	get_timestamp(start_time);
 
-	stpscal = 2.75f;
+	stpscal = 1.0f;//2.75f;
 
 	int	m = 8;
 	if (site_num * 2 < m)

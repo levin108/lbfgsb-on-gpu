@@ -315,6 +315,7 @@
     <CudaCompile Include="L-BFGS\dpofa.cu" />
     <CudaCompile Include="L-BFGS\formk.cu" />
     <CudaCompile Include="L-BFGS\formt.cu" />
+    <CudaCompile Include="L-BFGS\freev.cu" />
     <CudaCompile Include="L-BFGS\lnsrlb.cu" />
     <CudaCompile Include="L-BFGS\matupd.cu" />
     <CudaCompile Include="L-BFGS\minimize.cu" />

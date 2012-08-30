@@ -37,6 +37,7 @@ namespace lbfgsbcuda {
 		__global__
 		void kernel00(
 			const int nsub,
+			const int* ind,
 			const int head,
 			const int m,
 			const int col,
@@ -59,11 +60,11 @@ namespace lbfgsbcuda {
 
 			if(j < nsub) {
 				int pointr = Modular((head + i % col), m);
-
+				const int k = ind[j];
 				if(i >= col) {
-					mySum = ws[j * iPitch_ws + pointr] * theta;
+					mySum = ws[k * iPitch_ws + pointr] * theta;
 				} else {
-					mySum = wy[j * iPitch_ws + pointr];
+					mySum = wy[k * iPitch_ws + pointr];
 				}
 				mySum *= d[j];
 			} else {
@@ -145,6 +146,7 @@ namespace lbfgsbcuda {
 
 		void prog0(
 			const int n,
+			const int* ind,
 			const int head,
 			const int m,
 			const int col,
@@ -155,6 +157,7 @@ namespace lbfgsbcuda {
 			const real* d,
 			real* wv,
 			const real theta,
+			const int iPitch_normal,
 			const cudaStream_t& stream
 			)
 		{
@@ -163,9 +166,9 @@ namespace lbfgsbcuda {
 			int nblock1 = iDivUp2(nblock0, mi);
 
 			real* output = (nblock1 == 1) ? wv : buf_array_p;
-			int op20 = (nblock1 == 1) ? 1 : n;
+			int op20 = (nblock1 == 1) ? 1 : iPitch_normal;
 
-			dynamicCall(kernel00, mi, nblock1, col * 2, stream, (n, head, m, col, iPitch_ws, op20, output, wy, ws, d, theta));
+			dynamicCall(kernel00, mi, nblock1, col * 2, stream, (n, ind, head, m, col, iPitch_ws, op20, output, wy, ws, d, theta));
 
 			nblock0 = nblock1;
 			while(nblock0 > 1) {
@@ -176,8 +179,8 @@ namespace lbfgsbcuda {
 
 				output = (nblock1 == 1) ? wv : (output + nblock0);
 
-				int op20 = (nblock1 == 1) ? 1 : n;
-				dynamicCall(kernel01, mi, nblock1, col * 2, stream, (nblock0, n, op20, input, output));
+				int op20 = (nblock1 == 1) ? 1 : iPitch_normal;
+				dynamicCall(kernel01, mi, nblock1, col * 2, stream, (nblock0, iPitch_normal, op20, input, output));
 
 				nblock0 = nblock1;
 			}
@@ -221,6 +224,7 @@ namespace lbfgsbcuda {
 		__global__
 		void kernel2(
 		int nsub,
+		const int* ind,
 		const int col,
 		const int head,
 		const int m,
@@ -249,8 +253,9 @@ namespace lbfgsbcuda {
 
 			if(i < nsub && tidx < col) {
 				const int pointr = Modular((head + tidx), m);
+				const int k = ind[i];
 				__syncthreads();
-				mySum = wy[i * iPitch + pointr] * a[0][tidx] + ws[i * iPitch + pointr] * a[1][tidx];
+				mySum = wy[k * iPitch + pointr] * a[0][tidx] + ws[k * iPitch + pointr] * a[1][tidx];
 			} else
 				mySum = 0;
 			
@@ -272,6 +277,7 @@ namespace lbfgsbcuda {
 
 		void prog2(
 			const int nsub,
+			const int* ind,
 			const int col,
 			const int head,
 			const int m,
@@ -289,19 +295,140 @@ namespace lbfgsbcuda {
 			if(col > 4) {
 				int nblocky = 512 / 8;
 				kernel2<8><<<dim3(iDivUp(nsub, nblocky)), dim3(8, nblocky), 0, stream>>>
-					(nsub, col, head, m, iPitch, wv, wy, ws, invtheta, d);
+					(nsub, ind, col, head, m, iPitch, wv, wy, ws, invtheta, d);
 			} else if(col > 2) {
 				int nblocky = 512 / 4;
 				kernel2<4><<<dim3(iDivUp(nsub, nblocky)), dim3(4, nblocky), 0, stream>>>
-					(nsub, col, head, m, iPitch, wv, wy, ws, invtheta, d);
+					(nsub, ind, col, head, m, iPitch, wv, wy, ws, invtheta, d);
 			} else if(col > 1) {
 				int nblocky = 512 / 2;
 				kernel2<2><<<dim3(iDivUp(nsub, nblocky)), dim3(2, nblocky), 0, stream>>>
-					(nsub, col, head, m, iPitch, wv, wy, ws, invtheta, d);
+					(nsub, ind, col, head, m, iPitch, wv, wy, ws, invtheta, d);
 			} else if(col == 1){
 				int nblocky = 512 / 1;
 				kernel2<1><<<dim3(iDivUp(nsub, nblocky)), dim3(1, nblocky), 0, stream>>>
-					(nsub, col, head, m, iPitch, wv, wy, ws, invtheta, d);
+					(nsub, ind, col, head, m, iPitch, wv, wy, ws, invtheta, d);
+			}
+		}
+
+		__global__
+		void kernel210(
+			int nsub,
+			const int* ind,
+			const real* d,
+			real* x,
+			const real* l,
+			const real* u,
+			const int* nbd)
+		{
+			const int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+			if(i >= nsub)
+				return;
+
+			const int k = ind[i];
+			real xk = x[k] + d[i];
+			const int nbdk = nbd[k];
+
+			if(nbdk == 1) {
+				xk = maxr(l[k], xk);
+			} else if(nbdk == 2) {
+				xk = maxr(l[k], xk);
+				xk = minr(u[k], xk);
+			} else if(nbdk == 3) {
+				xk = minr(u[k], xk);
+			}
+
+			x[k] = xk;
+		}
+
+		template<int bx>
+		__global__
+		void kernel211(
+			const int n,
+			real* buf_n_r,
+			const real* x,
+			const real* xx,
+			const real* gg
+			)
+		{
+			const int i = blockIdx.x * blockDim.x + threadIdx.x;
+			const int tid = threadIdx.x;
+			
+			volatile __shared__ real sdata[bx];
+
+			real mySum;
+
+			if(i < n) {
+				mySum = (x[i] - xx[i]) * gg[i];
+			} else {
+				mySum = 0;
+			}
+
+			sdata[tid] = mySum;
+			__syncthreads();
+			if(bx > 512) {if (tid < 512) { sdata[tid] = mySum = (mySum + sdata[tid + 512]); } __syncthreads();}			
+			if(bx > 256) {if (tid < 256) { sdata[tid] = mySum = (mySum + sdata[tid + 256]); } __syncthreads();}
+			if(bx > 128) {if (tid < 128) { sdata[tid] = mySum = (mySum + sdata[tid + 128]); } __syncthreads();}
+			if(bx > 64) {if (tid <  64) { sdata[tid] = mySum = (mySum + sdata[tid +  64]); } __syncthreads();}
+    
+			if (tid < __min(bx / 2, 32))
+			{
+				// now that we are using warp-synchronous programming (below)
+				// we need to declare our shared memory volatile so that the compiler
+				// doesn't reorder stores to it and induce incorrect behavior.
+				volatile real* smem = sdata + tid;
+				if(bx > 32) {*smem = mySum = mySum + smem[32];}
+				if(bx > 16) {*smem = mySum = mySum + smem[16];}
+				if(bx > 8) {*smem = mySum = mySum + smem[8];}
+				if(bx > 4) {*smem = mySum = mySum + smem[4];}
+				if(bx > 2) {*smem = mySum = mySum + smem[2];}
+				if(bx > 1) {*smem = mySum = mySum + smem[1];}
+			}
+
+			if (tid == 0) 
+				buf_n_r[blockIdx.x] = mySum;
+		}
+
+		void prog21
+			( 
+			int n,
+			int nsub,
+			const int* ind,
+			const real* d,
+			real* x,
+			const real* l,
+			const real* u,
+			const int* nbd,
+			const real* xx,
+			const real* gg,
+			real* buf_n_r,
+			real* pddp,
+			const cudaStream_t& stream)
+		{
+			kernel210<<<iDivUp(n, 512), 512, 0, stream>>>
+				(nsub, ind, d, x, l, u, nbd);
+
+			int nblock0 = n;
+			int mi = log2Up(nblock0);
+			int nblock1 = iDivUp2(nblock0, mi);
+
+			real* output = (nblock1 == 1) ? pddp : buf_n_r;
+
+			dynamicCall(kernel211, mi, nblock1, 1, stream, (n, output, x, xx, gg));
+
+			nblock0 = nblock1;
+			while(nblock0 > 1) {
+
+				nblock1 = iDivUp2(nblock0, mi);
+
+				real* input = output;
+
+				output = (nblock1 == 1) ? pddp : (output + nblock0);
+
+				dynamicCall(kernel01, mi, nblock1, 1, stream, (nblock0, n, 1, input, output));
+
+				nblock0 = nblock1;
 			}
 		}
 
@@ -317,6 +444,7 @@ namespace lbfgsbcuda {
 		__global__
 		void kernel30(
 		const int nsub,
+		const int* ind,
 		real* d,
 		const int* nbd,
 		real* t,
@@ -336,13 +464,14 @@ namespace lbfgsbcuda {
 			real mySum = 1.0;
 
 			if(i < nsub) {
-				const int nbdi = nbd[i];
+				const int k = ind[i];
+				const int nbdi = nbd[k];
 
 				if(nbdi != 0) {
 					real dk = d[i];
 				    if( dk < 0 && nbdi <= 2 )
 					{
-						real temp2 = l[i] - x[i];
+						real temp2 = l[k] - x[k];
 						if( temp2 >= 0 )
 						{
 							mySum = 0;
@@ -354,7 +483,7 @@ namespace lbfgsbcuda {
 					}
 					else if( dk > 0 && nbdi >= 2 )
 					{
-						real temp2 = u[i] - x[i];
+						real temp2 = u[k] - x[k];
 						if( temp2 <= 0 )
 						{
 							mySum = 0;
@@ -400,12 +529,13 @@ namespace lbfgsbcuda {
 
 					if(gridDim.x == 1 && *smem < 1) {
 						real dk = d[*smemi];
+						const int k = ind[*smemi];
 						if(dk > 0) {
-							x[*smemi] = u[*smemi];
+							x[k] = u[k];
 							d[*smemi] = 0;
 						} else if(dk < 0)
 						{
-							x[*smemi] = l[*smemi];
+							x[k] = l[k];
 							d[*smemi] = 0;
 						}
 					}
@@ -417,6 +547,7 @@ namespace lbfgsbcuda {
 		__global__
 		void kernel31(
 			const int n,
+			const int* ind,
 			const real* buf_in,
 			const int* bufi_in,
 			real* buf_out,
@@ -471,12 +602,13 @@ namespace lbfgsbcuda {
 					
 					if(gridDim.x == 1 && *smem < 1) {
 						real dk = d[*smemi];
+						const int k = ind[*smemi];
 						if(dk > 0) {
-							x[*smemi] = u[*smemi];
+							x[k] = u[k];
 							d[*smemi] = 0;
 						} else if(dk < 0)
 						{
-							x[*smemi] = l[*smemi];
+							x[k] = l[k];
 							d[*smemi] = 0;
 						}
 					}
@@ -487,6 +619,7 @@ namespace lbfgsbcuda {
 		__global__
 		void kernel32(
 			const int nsub,
+			const int* ind,
 			real* x,
 			const real* d,
 			const real* alpha
@@ -495,24 +628,27 @@ namespace lbfgsbcuda {
 			const int i = blockIdx.x * blockDim.x + threadIdx.x;
 
 			__shared__ real salpha[1];
-			
+
 			if(i >= nsub)
 				return;
+
+			const int k = ind[i];
 
 			if(threadIdx.x == 0) {
 				*salpha = alpha[0];
 			}
-			real xi = x[i];
+			real xi = x[k];
 			real di = d[i];
 
 			__syncthreads();
 			
-			x[i] = salpha[0] * di + xi;
+			x[k] = salpha[0] * di + xi;
 		}
 
 		void prog3
 		(
 			const int nsub,
+			const int* ind,
 			real* d,
 			const int* nbd,
 			real* buf_s_r,
@@ -531,7 +667,7 @@ namespace lbfgsbcuda {
 			real* output_r = buf_s_r;
 			int* output_i = bufi_s_r;
 
-			dynamicCall(kernel30, mi, nblock1, 1, stream, (nsub, d, nbd, output_r, output_i, x, u, l));
+			dynamicCall(kernel30, mi, nblock1, 1, stream, (nsub, ind, d, nbd, output_r, output_i, x, u, l));
 
 /*
 			kernel30<<<dim3(nblock1), dim3(512)>>>
@@ -550,7 +686,7 @@ namespace lbfgsbcuda {
 				output_r = output_r + nblock0;
 				output_i = output_i + nblock0;
 
-				dynamicCall(kernel31, mi, nblock1, 1, stream, (nblock0, input_r, input_i, output_r, output_i, d, x, u, l));
+				dynamicCall(kernel31, mi, nblock1, 1, stream, (nblock0, ind, input_r, input_i, output_r, output_i, d, x, u, l));
 
 /*
 				kernel31<<<dim3(nblock1), dim3(512)>>>
@@ -560,7 +696,7 @@ namespace lbfgsbcuda {
 			}
 
 			kernel32<<<dim3(iDivUp(nsub, 512)), dim3(512), 0, stream>>>
-				(nsub, x, d, output_r);
+				(nsub, ind, x, d, output_r);
 
 		}
 

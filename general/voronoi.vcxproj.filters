@@ -138,5 +138,8 @@
       <Filter>L-BFGS\kernel</Filter>
     </CudaCompile>
     <CudaCompile Include="voronoi.cu" />
+    <CudaCompile Include="L-BFGS\freev.cu">
+      <Filter>L-BFGS\kernel</Filter>
+    </CudaCompile>
   </ItemGroup>
 </Project>

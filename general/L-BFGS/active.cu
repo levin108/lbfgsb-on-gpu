@@ -38,7 +38,9 @@ namespace lbfgsbcuda {
 			const real* l,
 			const real* u,
 			const int* nbd,
-			real* x)
+			real* x,
+			int* iwhere
+			)
 		{
 			const int i = blockIdx.x * blockDim.x + threadIdx.x;
 			if(i >= n)
@@ -48,6 +50,7 @@ namespace lbfgsbcuda {
 			real xi = x[i];
 			real li = l[i];
 			real ui = u[i];
+			int iwi = -1;
 
 			if(nbdi > 0) {
 				if( nbdi <= 2 )
@@ -59,7 +62,16 @@ namespace lbfgsbcuda {
 					xi = minr(xi, ui);
 				}
 			} 
-			x[i] = xi;			
+
+			if(nbdi == 2 && ui - li <= 0) {
+				iwi = 3;
+			} else if(nbdi != 0)
+			{
+				iwi = 0;
+			}
+
+			x[i] = xi;
+			iwhere[i] = iwi;
 		}
 
 
@@ -68,13 +80,15 @@ namespace lbfgsbcuda {
 			const real* l,
 			const real* u,
 			const int* nbd,
-			real* x
+			real* x,
+			int* iwhere
 			) 
 		{
 
 			kernel0<<<dim3(iDivUp(n, 512)), dim3(512)>>>
-				(n, l, u, nbd, x);
+				(n, l, u, nbd, x, iwhere);
 
+			CheckBuffer_int(iwhere, n, n);
 		}
 	};
 };

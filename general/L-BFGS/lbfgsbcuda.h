@@ -43,23 +43,25 @@ extern cublasHandle_t cublasHd;
 #define Modular(a, b) (a % b)
 #endif
 
-#define dynamicCall(f, bx, nblockx, nblocky, st, var) \
+#define dynamicCall3D(f, bx, nblockx, nblocky, nblockz, st, var) \
 {\
 	switch(bx) { \
 	case 9: \
-		f<512><<<dim3(nblockx, nblocky), dim3(512), 0, st>>>var;\
-		break;\
+	f<512><<<dim3(nblockx, nblocky, nblockz), dim3(512), 0, st>>>var;\
+	break;\
 	case 8: \
-		f<256><<<dim3(nblockx, nblocky), dim3(256), 0, st>>>var;\
-		break;\
+	f<256><<<dim3(nblockx, nblocky, nblockz), dim3(256), 0, st>>>var;\
+	break;\
 	case 7: \
-		f<128><<<dim3(nblockx, nblocky), dim3(128), 0, st>>>var;\
-		break;\
+	f<128><<<dim3(nblockx, nblocky, nblockz), dim3(128), 0, st>>>var;\
+	break;\
 	default: \
-		f<64><<<dim3(nblockx, nblocky), dim3(64), 0, st>>>var;\
-		break;\
-	} \
+	f<64><<<dim3(nblockx, nblocky, nblockz), dim3(64), 0, st>>>var;\
+	break;\
+} \
 }
+
+#define dynamicCall(f, bx, nblockx, nblocky, st, var) dynamicCall3D(f, bx, nblockx, nblocky, 1, st, var)
 
 #define inv9l2 0.36910312165415137198559104772104
 #define invl2 3.3219280948873623478703194294894
@@ -77,9 +79,9 @@ typedef double real;
 #define cublasRtrsm cublasDtrsm
 #define cublasRtrsv cublasDtrsv
 #define cublasRdot cublasDdot
-#define EPSG 5E-16
-#define EPSF 5E-16
-#define EPSX 5E-16
+#define EPSG 1E-64
+#define EPSF 1E-64
+#define EPSX 1E-64
 #define MAXITS 1000
 #else
 typedef float real;
@@ -152,7 +154,7 @@ namespace lbfgsbcuda {
 #endif
 	}
 
-	inline void CheckBuffer_int(int* q, int stride, int total) {
+	inline void CheckBuffer_int(const int* q, int stride, int total) {
 #ifdef _DEBUG
 		if(stride <= 0 || total <= 0)
 			return;
@@ -210,7 +212,8 @@ namespace lbfgsbcuda {
 			const real* l,
 			const real* u,
 			const int* nbd,
-			real* x
+			real* x,
+			int* iwhere
 			);
 	};
 	namespace projgr {
@@ -252,8 +255,30 @@ namespace lbfgsbcuda {
 			const real& sbgnrm,
 			real* buf_s_r,
 			real* buf_array_p,
+			int* iwhere,
+			const int& iPitch_normal,
 			const cudaStream_t* streamPool
 			);
+	};
+	namespace freev {
+		void prog0( 
+			const int& n, 
+			int& nfree, 
+			int* index, 
+			int& nenter, 
+			int& ileave, 
+			int* indx2, 
+			const int* iwhere, 
+			bool& wrk, 
+			const bool& updatd, 
+			const bool& cnstnd, 
+			const int& iter,
+			int* temp_ind1,
+			int* temp_ind2,
+			int* temp_ind3,
+			int* temp_ind4
+			);
+
 	};
 	namespace formk {
 		void prog0(
@@ -263,16 +288,20 @@ namespace lbfgsbcuda {
 			const cudaStream_t* streamPool
 			);
 		void prog1(
-			int n,
+			const int n,
+			const int nsub,
 			const int ipntr,
+			const int* ind,
 			real* wn1,
 			real* buf_array_p,
+			const real* ws,
 			const real* wy,
 			const int head,
 			const int m,
 			const int col,
 			const int iPitch_ws,
 			const int iPitch_wn,
+			const int iPitch_normal,
 			const cudaStream_t* streamPool
 			);
 		void prog2(
@@ -283,11 +312,13 @@ namespace lbfgsbcuda {
 			const cudaStream_t* streamPool
 			);
 		void prog3(
+			const int* ind,
 			const int jpntr,
 			const int head,
 			const int m,
 			const int col,
 			const int n,
+			const int nsub,
 			const int iPitch_ws,
 			const int iPitch_wn,
 			const int jy,
@@ -295,7 +326,43 @@ namespace lbfgsbcuda {
 			const real* wy,
 			real* buf_array_p,
 			real* wn1,
+			const int iPitch_normal,
 			const cudaStream_t* streamPool);
+		void prog31(
+			const int* indx2, 
+			const int head, 
+			const int m, 
+			const int upcl, 
+			const int col, 
+			const int nenter,
+			const int ileave,
+			const int n, 
+			const int iPitch_ws, 
+			const int iPitch_wn, 
+			const real* wy, 
+			real* buf_array_sup, 
+			real* wn1,
+			const real scal,
+			const int iPitch_super,
+			const cudaStream_t* streamPool		
+			);
+		void prog32( 
+			const int* indx2, 
+			const int head, 
+			const int m, 
+			const int upcl, 
+			const int nenter,
+			const int ileave,
+			const int n, 
+			const int iPitch_ws, 
+			const int iPitch_wn, 
+			const real* wy, 
+			const real* ws, 
+			real* buf_array_sup, 
+			real* wn1,
+			const int iPitch_super,
+			const cudaStream_t* streamPool			
+			);
 		void prog4(
 			const int col,
 			const int iPitch_wn,
@@ -321,6 +388,7 @@ namespace lbfgsbcuda {
 			);
 		void prog1(
 			int nfree,
+			const int* index,
 			const int col,
 			const int head,
 			const int m,
@@ -339,6 +407,7 @@ namespace lbfgsbcuda {
 	namespace subsm {
 		void prog0(
 			const int n,
+			const int* ind,
 			const int head,
 			const int m,
 			const int col,
@@ -349,6 +418,7 @@ namespace lbfgsbcuda {
 			const real* d,
 			real* wv,
 			const real theta,
+			const int iPitch_normal,
 			const cudaStream_t& stream
 			);
 		void prog1(
@@ -360,6 +430,7 @@ namespace lbfgsbcuda {
 			);
 		void prog2(
 			int nsub,
+			const int* ind,
 			const int col,
 			const int head,
 			const int m,
@@ -371,8 +442,24 @@ namespace lbfgsbcuda {
 			real* d,
 			const cudaStream_t& stream
 			);
+		void prog21
+			( 
+			int n,
+			int nsub,
+			const int* ind,
+			const real* d,
+			real* x,
+			const real* l,
+			const real* u,
+			const int* nbd,
+			const real* xx,
+			const real* gg,
+			real* buf_n_r,
+			real* pddp,
+			const cudaStream_t& stream);
 		void prog3
 			(int nsub,
+			const int* ind,
 			real* d,
 			const int* nbd,
 			real* buf_s_r,
@@ -422,6 +509,7 @@ namespace lbfgsbcuda {
 			const int& iPitch_i,
 			const int& iPitch_j,
 			real* buf_array_p,
+			const int& iPitch_normal,
 			cudaStream_t st);
 	};
 	namespace formt {

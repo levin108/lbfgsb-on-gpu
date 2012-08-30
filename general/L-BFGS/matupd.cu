@@ -60,10 +60,16 @@ namespace lbfgsbcuda {
 			const int i = threadIdx.x;
 			const int j = threadIdx.y;
 
-			if(j >= col - 1 || i >= j)
+			__shared__ real sdata[8][8];
+
+			sdata[j][i] = sy[j * iPitch_i + i * iPitch_j];
+
+			if(i >= col - 1 || j >= col - 1 || i > j)
 				return;
 
-			sy[j * iPitch_i + i * iPitch_j] = sy[(j + 1) * iPitch_i + (i + 1) * iPitch_j];
+			__syncthreads();
+
+			sy[j * iPitch_i + i * iPitch_j] = sdata[j + 1][i + 1];
 		}
 
 		template<int bx>
@@ -183,18 +189,20 @@ namespace lbfgsbcuda {
 			const int& iPitch_i,
 			const int& iPitch_j,
 			real* buf_array_p,
+			const int& iPitch_normal,
 			cudaStream_t st)
 		{
 			CheckBuffer(wy, m, n * m);
 			kernel0<<<dim3(iDivUp(n, 512)), dim3(512), 0, st>>>
 				(n, wy + itail, r, iPitch0);
 			CheckBuffer(wy, m, n * m);
-/*
+
 			if( iupdat > m )
 			{
-				kernel1<<<1, dim3(col - 1, col - 1), 0, st>>>
+				CheckBuffer(sy, iPitch_i, col * iPitch_i);
+				kernel1<<<1, dim3(col, col), 0, st>>>
 					(sy, iPitch_i, iPitch_j, col);
-			}*/
+			}
 			
 			if(col > 1) {
 				CheckBuffer(sy, iPitch_i, col * iPitch_i);
@@ -206,7 +214,7 @@ namespace lbfgsbcuda {
 
 				real* output = (nblock1 == 1) ? oFinal : buf_array_p;
 
-				int op20 = (nblock1 == 1) ? iPitch_j : n;
+				int op20 = (nblock1 == 1) ? iPitch_j : iPitch_normal;
 				
 				dynamicCall(kernel20, mi, nblock1, col - 1, st, (nblock0, head, m, col, iPitch0, op20, d, output, wy));
 
@@ -224,8 +232,8 @@ namespace lbfgsbcuda {
 
 					output = (nblock1 == 1) ? oFinal : (output + nblock0);
 
-					int op20 = (nblock1 == 1) ? iPitch_j : n;
-					dynamicCall(kernel21, mi, nblock1, col - 1, st, (nblock0, n, op20, input, output));
+					int op20 = (nblock1 == 1) ? iPitch_j : iPitch_normal;
+					dynamicCall(kernel21, mi, nblock1, col - 1, st, (nblock0, iPitch_normal, op20, input, output));
 
 /*
 					kernel21<<<dim3(nblock1, col - 1), dim3(512), 0, st>>>

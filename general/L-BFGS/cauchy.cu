@@ -42,7 +42,8 @@ namespace lbfgsbcuda {
 		real* t,
 		const real* x,
 		const real* u,
-		const real* l
+		const real* l,
+		int* iwhere
 		)
 		{
 			const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -53,32 +54,50 @@ namespace lbfgsbcuda {
 			real mySum;
 
 			if(i < n) {
-				real neggi = -g[i];
-				const int nbdi = nbd[i];
-
-
-				if(neggi == 0)
-					neggi = machineepsilon;
-				real tl = 0;
-				real tu = 0;
-
-
-				if( nbdi <= 2 )
+				int iwi = iwhere[i];
+				if( iwi != 3 && iwi != -1 )
 				{
-					tl = x[i] - l[i];
+					real neggi = -g[i];
+					int nbdi = nbd[i];
+
+					real tl = 0;
+					real tu = 0;
+				
+					if( nbdi <= 2 )
+					{
+						tl = x[i] - l[i];
+					} 
+					if( nbdi >= 2 )
+					{
+						tu = u[i] - x[i];
+					}
+
+					if(nbdi <= 2 && tl<=0 && neggi <= 0) {
+						iwi = 1;
+					}else if(nbdi >= 2 && tu <= 0 && neggi >= 0) {
+						iwi = 2;
+					} else if( neggi == 0) {
+						iwi = -3;
+					} else {
+						iwi = 0;
+					}
+
+					iwhere[i] = iwi;
+
+					if((iwi != 0 && iwi != -1) || neggi == 0) {
+						mySum = machinemaximum;
+					} else {
+						if(nbdi <= 2 && nbdi != 0 && neggi < 0) {
+							mySum = tl / (-neggi);
+						} else if(nbdi >= 2 && neggi > 0) {
+							mySum = tu / neggi;
+						} else {
+							mySum = machinemaximum;
+						}
+					}
+				} else {
+					mySum = machinemaximum;
 				}
-				if( nbdi >= 2 )
-				{
-					tu = u[i] - x[i];
-				}
-
-
-				bool k1 = nbdi <= 2 && nbdi != 0 && neggi < 0;
-/*				bool k2 = nbdi >= 2 && neggi > 0;*/
-
-				real tlu = k1 ? -tl : tu;
-
-				mySum = tlu / neggi;
 			} else {
 				mySum = machinemaximum;
 			}
@@ -159,7 +178,9 @@ namespace lbfgsbcuda {
 			void kernel1(
 			const int n,
 			const real* g,
-			real* buf_s_r) 
+			real* buf_s_r,
+			const int* iwhere
+			) 
 		{
 			const int i = blockIdx.x * blockDim.x + threadIdx.x;
 			
@@ -168,14 +189,17 @@ namespace lbfgsbcuda {
 
 			real mySum;
 
-			if(i < n) {
-				real neggi = g[i];
-				if(neggi == 0)
-					neggi = machineepsilon;
-				mySum = -neggi * neggi;
-			} else {
+			if(i >= n) {
 				mySum = 0;
-			}
+			} else {
+				int iwi = iwhere[i];
+				if(iwi != 0 && iwi != -1) {
+					mySum = 0;
+				} else {
+					real neggi = g[i];
+					mySum = -neggi * neggi;
+				}
+			} 
 
 			sdata[tid] = mySum;
 			__syncthreads();
@@ -214,7 +238,9 @@ namespace lbfgsbcuda {
 			const real* g,
 			real* buf_array_p,
 			const real* wy,
-			const real* ws)
+			const real* ws,
+			const int* iwhere
+			)
 		{
 			const int i = blockIdx.x * blockDim.x + threadIdx.x;
 			const int j = blockIdx.y;
@@ -225,20 +251,23 @@ namespace lbfgsbcuda {
 			real mySum;
 
 			if(i < n) {
-				real neggi = -g[i];
-				if(neggi == 0)
-					neggi = machineepsilon;
-				
-				real p0;
-				if(j < col) {
-					int pointr = Modular((head + j), m);
-					p0 = wy[i * iPitch + pointr];
+				int iwi = iwhere[i];
+				if(iwi != 0 && iwi != -1) {
+					mySum = 0;
 				} else {
-					int pointr = Modular((head + j - col), m);
-					p0 = ws[i * iPitch + pointr];
-				}
+					real neggi = -g[i];
+				
+					real p0;
+					if(j < col) {
+						int pointr = Modular((head + j), m);
+						p0 = wy[i * iPitch + pointr];
+					} else {
+						int pointr = Modular((head + j - col), m);
+						p0 = ws[i * iPitch + pointr];
+					}
 
-				mySum = p0 * neggi; 				
+					mySum = p0 * neggi; 
+				}
 			} else {
 				mySum = 0;
 			}
@@ -353,7 +382,8 @@ namespace lbfgsbcuda {
 			const real* g,
 			real* xcp,
 			real* xcpb,
-			const real dtm
+			const real dtm,
+			const int* iwhere
 			)
 		{
 			const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -361,11 +391,15 @@ namespace lbfgsbcuda {
 			if(i >= n)
 				return;
 
-			real neggi = -g[i];
-			if(neggi == 0)
-				neggi = machineepsilon;
-
-			real res =  x[i] + neggi * dtm;
+			real inc;
+			int iwi = iwhere[i];
+			if(iwi != 0 && iwi != -1) {
+				inc = 0;
+			} else {
+				real neggi = -g[i];
+				inc = neggi * dtm;
+			}
+			real res =  x[i] + inc;
 			xcp[i] = res;
 			xcpb[i] = res;
 		}
@@ -396,9 +430,15 @@ namespace lbfgsbcuda {
 			 const real& sbgnrm,
 			 real* buf_s_r,
 			 real* buf_array_p,
+			 int* iwhere,
+			 const int& iPitch_normal,
 			 const cudaStream_t* streamPool
 			 )
 		{
+			CheckBuffer(x, n, n);
+			CheckBuffer(l, n, n);
+			CheckBuffer(u, n, n);
+
 			if(sbgnrm <= 0) {
 				cudaMemcpyAsync(xcp, x, n * sizeof(real), cudaMemcpyDeviceToDevice);
 				return;
@@ -428,14 +468,14 @@ namespace lbfgsbcuda {
 			real* output1 = (nblock1 == 1) ? f1_d : buf_s_r;
 			real* output2 = (nblock1 == 1) ? p : buf_array_p;
 
-			dynamicCall(kernel0, mi, nblock1, 1, streamPool[0], (nblock0, g, nbd, output0, x, u, l));
+			dynamicCall(kernel0, mi, nblock1, 1, streamPool[0], (nblock0, g, nbd, output0, x, u, l, iwhere));
 
-			dynamicCall(kernel1, mi, nblock1, 1, streamPool[1], (nblock0, g, output1));
+			dynamicCall(kernel1, mi, nblock1, 1, streamPool[0], (nblock0, g, output1, iwhere));
 
-			int op20 = (nblock1 == 1) ? 1 : n;
+			int op20 = (nblock1 == 1) ? 1 : iPitch_normal;
 
 			if(col > 0) {
-				dynamicCall(kernel20, mi, nblock1, col * 2, streamPool[2], (nblock0, head, m, col, iPitch, op20, g, output2, wy, ws));
+				dynamicCall(kernel20, mi, nblock1, col * 2, streamPool[0], (nblock0, head, m, col, iPitch, op20, g, output2, wy, ws, iwhere));
 
 			}
 			nblock0 = nblock1;
@@ -456,9 +496,9 @@ namespace lbfgsbcuda {
 
 				dynamicCall(kernel21, mi, nblock1, 1, streamPool[1], (nblock0, 1, 1, input1, output1));
 
-				int op20 = (nblock1 == 1) ? 1 : n;
+				int op20 = (nblock1 == 1) ? 1 : iPitch_normal;
 				if(col > 0) {
-					dynamicCall(kernel21, mi, nblock1, col * 2, streamPool[2], (nblock0, n, op20, input2, output2));
+					dynamicCall(kernel21, mi, nblock1, col * 2, streamPool[2], (nblock0, iPitch_normal, op20, input2, output2));
 				}
 
 				nblock0 = nblock1;
@@ -497,8 +537,7 @@ namespace lbfgsbcuda {
 				cublasSetStream(cublasHd, NULL);
 			}
 
-			cutilSafeCall(cudaStreamSynchronize(streamPool[1]));
-			cutilSafeCall(cudaStreamSynchronize(streamPool[2]));
+			cutilSafeCall(cudaDeviceSynchronize());
 			
 			real f2 = -theta * *f1_h - *fd_h;
 			real dt = -*f1_h / f2;
@@ -507,7 +546,7 @@ namespace lbfgsbcuda {
 			dtm = __max(0, dtm);
 			
 			kernel3<<<dim3(iDivUp(n, 512)), dim3(512), 0, streamPool[0]>>>
-				(n, x, g, xcp, xcpb, dtm);
+				(n, x, g, xcp, xcpb, dtm, iwhere);
 
 			if(col > 0) {
 				kernel4<<<dim3(1), dim3(col * 2), 0, streamPool[1]>>>
