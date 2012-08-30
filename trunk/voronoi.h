@@ -64,6 +64,7 @@ int frame_num = 0;
 float speed;
 int additional_passes, additional_passes_before;
 bool bReCompute;
+real stpscal;
 
 SiteType *site_list;
 SiteType *site_list_dev;

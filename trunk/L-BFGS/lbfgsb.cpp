@@ -1266,7 +1266,6 @@ inline void lbfgsbdcsrch(const real& f,
         {
             lbfgsbdcstep(stx, fx, gx, sty, fy, gy, stp, f, g, brackt, stmin, stmax);
         }
-		stp *= stpscal;
         if( brackt )
         {
             if( fabs(sty - stx) >= 0.666666666666666667 * width1 )
@@ -1283,6 +1282,7 @@ inline void lbfgsbdcsrch(const real& f,
             stmin = stp + xtrapl * (stp - stx);
             stmax = stp + xtrapu * (stp - stx);
         }
+		stp *= stpscal;
         stp = fmaxf(stp, stpmin);
         stp = fminf(stp, stpmax);
         if( brackt && (stp <= stmin || stp >= stmax) || brackt && stmax - stmin <= xtol * stmax )
