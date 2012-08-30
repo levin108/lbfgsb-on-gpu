@@ -17,180 +17,6 @@ extern void Energyf(cudaGraphicsResource_t grSite, real* g, real* f, int w, int 
 extern void ConvertSites(real* x, cudaGraphicsResource_t gr, int nsite, int screenw, const cudaStream_t& stream);
 extern void InitSites(real* x, float* init_sites, int stride, int* nbd, real* l, real* u, int nsite, int screenw);
 
-// An implementation of the small linear feedback shift registers (LFSR) for
-// use in a Markov chain quasi-Monte Carlo context, as described in S. Chen,
-// M. Matsumoto, T. Nishimura, and A. Owen: "New inputs and methods for Markov
-// chain quasi-Monte Carlo", and S. Chen: "Consistence and convergence rate of
-// Markov chain quasi-Monte Carlo with examples".
-// Apart from the matrix that describes the recurrence, this class is stateless,
-// and can therefore be easily shared in a multi-threaded context.
-// class Mcqmclfsr // Markov chain quasi-Monte Carlo linear feedback shift register.
-// {
-// public:
-// 	enum Offset_type
-// 	{
-// 		ORIGINAL, // The original ones from the paper.
-// 		GOOD_PROJECTIONS // Maximized minimum distance for some projections.
-// 	};
-// 
-// 	// Construct a small LFSR with period 2^m - 1, for 3 <= m <= 32.
-// 	// The offset_type describes which set of offset values to use.
-// 	explicit Mcqmclfsr(unsigned m, Offset_type offset_type);
-// 
-// 	// Update the given state, and return the next value in the sequence,
-// 	// using the scramble value as a random bit shift. For the first invocation
-// 	// an arbitrary state value 0 < *state < 2^m may be used. The scramble parameter
-// 	// may be an arbitrary (possibly random) value. To generate the scrambled
-// 	// coordinates of the origin it is valid to pass *state == 0, but in this case
-// 	// the state will not be updated.
-// 	float next(unsigned scramble, unsigned* state) const;
-// 
-// private:
-// 	const unsigned m_m; // period 2^m - 1
-// 	unsigned m_f[32]; // f_d^s
-// };
-// 
-// Mcqmclfsr::Mcqmclfsr(const unsigned m, const Mcqmclfsr::Offset_type offset_type)
-// 	: m_m(m)
-// {
-// 	assert(3 <= m && m <= 32);
-// 
-// 	// Table taken from T. Hansen and G. Mullen:
-// 	// "Primitive Polynomials over Finite Fields".
-// 	// It is implied that the coefficient for t^m is 1.
-// 	const unsigned primitive_polynomials[32 - 3 + 1] =
-// 	{
-// 		(1 << 1) | 1,                       // 3
-// 		(1 << 1) | 1,                       // 4
-// 		(1 << 2) | 1,                       // 5
-// 		(1 << 1) | 1,                       // 6
-// 		(1 << 1) | 1,                       // 7
-// 		(1 << 4) | (1 << 3) | (1 << 2) | 1, // 8
-// 		(1 << 4) | 1,                       // 9
-// 		(1 << 3) | 1,                       // 10
-// 		(1 << 2) | 1,                       // 11
-// 		(1 << 6) | (1 << 4) | (1 << 1) | 1, // 12
-// 		(1 << 4) | (1 << 3) | (1 << 1) | 1, // 13
-// 		(1 << 5) | (1 << 3) | (1 << 1) | 1, // 14
-// 		(1 << 1) | 1,                       // 15
-// 		(1 << 5) | (1 << 3) | (1 << 2) | 1, // 16
-// 		(1 << 3) | 1,                       // 17
-// 		(1 << 7) | 1,                       // 18
-// 		(1 << 5) | (1 << 2) | (1 << 1) | 1, // 19
-// 		(1 << 3) | 1,                       // 20
-// 		(1 << 2) | 1,                       // 21
-// 		(1 << 1) | 1,                       // 22
-// 		(1 << 5) | 1,                       // 23
-// 		(1 << 4) | (1 << 3) | (1 << 1) | 1, // 24
-// 		(1 << 3) | 1,                       // 25
-// 		(1 << 6) | (1 << 2) | (1 << 1) | 1, // 26
-// 		(1 << 5) | (1 << 2) | (1 << 1) | 1, // 27
-// 		(1 << 3) | 1,                       // 28
-// 		(1 << 2) | 1,                       // 29
-// 		(1 << 6) | (1 << 4) | (1 << 1) | 1, // 30
-// 		(1 << 3) | 1,                       // 31
-// 		(1 << 7) | (1 << 6) | (1 << 2) | 1  // 32
-// 	};
-// 
-// 	// The original offsets 10 <= m <= 32 are taken from S. Chen, M. Matsumoto, T. Nishimura,
-// 	// and A. Owen: "New inputs and methods for Markov chain quasi-Monte Carlo".
-// 	// The alternative set of offsets for 3 <= m <= 16 was computed by Leonhard Gruenschloss.
-// 	// They should also yield maximal equidistribution as described in P. L'Ecuyer: "Maximally
-// 	// Equidistributed Combined Tausworthe Generators", but their projections might have better
-// 	// maximized minimum distance properties.
-// 	const unsigned offsets[32 - 3 + 1][2] =
-// 	{
-// 		// org / good proj.
-// 		{ 1,    1     }, // 3
-// 		{ 2,    2     }, // 4
-// 		{ 15,   15    }, // 5
-// 		{ 8,    8     }, // 6
-// 		{ 4,    4     }, // 7
-// 		{ 41,   41    }, // 8
-// 		{ 113,  113   }, // 9
-// 		{ 115,  226   }, // 10 *
-// 		{ 291,  520   }, // 11 *
-// 		{ 172,  1583  }, // 12 *
-// 		{ 267,  2242  }, // 13 *
-// 		{ 332,  2312  }, // 14 *
-// 		{ 388,  38    }, // 15 *
-// 		{ 283,  13981 }, // 16 *
-// 		{ 514,  514   }, // 17
-// 		{ 698,  698   }, // 18
-// 		{ 706,  706   }, // 19
-// 		{ 1304, 1304  }, // 20
-// 		{ 920,  920   }, // 21
-// 		{ 1336, 1336  }, // 22
-// 		{ 1236, 1236  }, // 23
-// 		{ 1511, 1511  }, // 24
-// 		{ 1445, 1445  }, // 25
-// 		{ 1906, 1906  }, // 26
-// 		{ 1875, 1875  }, // 27
-// 		{ 2573, 2573  }, // 28
-// 		{ 2633, 2633  }, // 29
-// 		{ 2423, 2423  }, // 30
-// 		{ 3573, 3573  }, // 31
-// 		{ 3632, 3632  }  // 32
-// 	};
-// 
-// 	// Construct the matrix that corresponds to a single transition.
-// 	unsigned matrix[32];
-// 	matrix[m - 1] = 0;
-// 	for (unsigned i = 1, pp = primitive_polynomials[m - 3]; i < m; ++i, pp >>= 1)
-// 	{
-// 		matrix[m - 1] |= (pp & 1) << (m - i); // Reverse bits.
-// 		matrix[i - 1] = 1 << (m - i - 1);
-// 	}
-// 
-// 	// Apply the matrix exponentiation according to the offset.
-// 	unsigned result0[32], result1[32]; // Storage for temporary results.
-// 	for (unsigned i = 0; i < m; ++i)
-// 		result0[i] = matrix[i]; // Copy over row.
-// 	unsigned* in = result0;
-// 	unsigned* out = result1;
-// 	const unsigned offset = offsets[m - 3][static_cast<int>(offset_type)];
-// 	for (unsigned i = 1; i < offset; ++i)
-// 	{
-// 		// Perform matrix multiplication: out = in * matrix.
-// 		for (unsigned y = 0; y < m; ++y)
-// 		{
-// 			out[y] = 0;
-// 			for (unsigned x = 0; x < m; ++x)
-// 				for (unsigned i = 0; i < m; ++i)
-// 					out[y] ^= (((in[y] >> i) & (matrix[m - i - 1] >> x)) & 1) << x;
-// 		}
-// 
-// 		// Swap input and output.
-// 		unsigned* tmp = in;
-// 		in = out;
-// 		out = tmp;
-// 	}
-// 
-// 	// Transpose the result for simpler multiplication.
-// 	for (unsigned y = 0; y < m; ++y)
-// 	{
-// 		m_f[y] = 0;
-// 		for (unsigned x = 0; x < m; ++x)
-// 			m_f[y] |= ((in[x] >> y) & 1) << (m - x - 1);
-// 	}
-// }
-// 
-// inline float Mcqmclfsr::next(const unsigned scramble, unsigned* const state) const
-// {
-// 	assert(state);
-// 
-// 	// Compute the matrix-vector multiplication using one matrix column at a time.
-// 	unsigned result = 0;
-// 	for (unsigned i = 0, s = *state; s; ++i, s >>= 1)
-// 		if (s & 1)
-// 			result ^= m_f[i];
-// 
-// 	assert(result <= ~-(1u << m_m));
-// 	*state = result; // Write result back.
-// 	result = (result << (32 - m_m)) ^ scramble; // Apply scrambling.
-// 	return result * (1.f / (1ULL << 32)); // Map to [0, 1).
-// }
-
 float* site_list_x = NULL;
 float* site_list_x_bar = NULL;
 float site_perturb_step = 0;
@@ -302,7 +128,7 @@ void DrawSites(bool FinalDrawSite, real* x, const cudaStream_t& stream)
 void funcgrad(real* x, real& f, real* g, const cudaStream_t& stream)
 {
 	int i,j;
-
+	get_timestamp(start_time_func);
 /*
 	for (i=0; i<site_num; i++)
 	{
@@ -346,7 +172,7 @@ void funcgrad(real* x, real& f, real* g, const cudaStream_t& stream)
 	glViewport(1, 1, screenwidth, screenheight);
 
 	DrawSites(false, x, stream);
-	get_timestamp(start_time_func);
+
 	glReadBuffer(fbo_attachments[0]);
 	//imdebugPixelsf(0, 0, screenwidth+2, screenheight+2, GL_RGBA);
 
@@ -630,6 +456,8 @@ real BFGSOptimization()
 	printf("Start optimization...");
 	get_timestamp(start_time);
 
+	stpscal = 2.75f;
+
 	int	m = 8;
 	if (site_num * 2 < m)
 		m = site_num * 2;
@@ -647,6 +475,14 @@ real BFGSOptimization()
 	bReCompute = false;
 	
 	real f = DrawVoronoi(x);
+
+	real* x_host = new real[site_num * 2];
+	memCopy(x_host, x, site_num * 2 * sizeof(real), cudaMemcpyDeviceToHost);
+	for(int i = 0; i < site_num; i++) {
+		site_list[i].vertices[0].x = x_host[i * 2] * (screenwidth-1.0) + 1.0;
+		site_list[i].vertices[0].y = x_host[i * 2 + 1] * (screenwidth-1.0) + 1.0;
+	}
+	delete[] x_host;
 
 	memFreeHost(f_tb_host);
 	memFree(x);
@@ -1273,6 +1109,9 @@ real DrawVoronoi(real* xx)
 	// Last pass, Display the result //
 	///////////////////////////////////
 	glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);    
+// 	glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, fbo_attachments[2], GL_RENDERBUFFER_EXT, RB_object);
+// 	CheckFramebufferStatus();
+// 	glDrawBuffer(fbo_attachments[2]);
 
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
@@ -1300,24 +1139,24 @@ real DrawVoronoi(real* xx)
 	glVertex2f(float(screenwidth), float(screenheight));
 	glVertex2f(float(screenwidth), 0.0);
 	glEnd();
-
+/*	glReadBuffer(fbo_attachments[2]);*/
 	//imdebugPixelsf(0, 0, screenwidth, screenheight, GL_RGBA);
-	GLubyte *buffer_raw = new GLubyte[screenwidth*screenheight*4];
-	glReadPixels(0,0,screenwidth,screenheight,GL_RGBA,GL_UNSIGNED_BYTE,buffer_raw);
-	char rawname[40];
-/*
-	strcpy(rawname, "CVD.raw");
-
-	std::ofstream myrawfile(rawname, std::ios::binary);
-	for (j=screenheight-1; j>=0; j--)
-		for (i=0; i<screenwidth; i++)
-		{
-			myrawfile << (unsigned char) buffer_raw[(j*screenwidth+i)*4];
-			myrawfile << (unsigned char) buffer_raw[(j*screenwidth+i)*4+1];
-			myrawfile << (unsigned char) buffer_raw[(j*screenwidth+i)*4+2];
-		}
-	myrawfile.close();
-	delete buffer_raw;*/
+// 	GLubyte *buffer_raw = new GLubyte[screenwidth*screenheight*4];
+// 	glReadPixels(0,0,screenwidth,screenheight,GL_RGBA,GL_UNSIGNED_BYTE,buffer_raw);
+// 	char rawname[40];
+// 
+// 	strcpy(rawname, "CVD.raw");
+// 
+// 	std::ofstream myrawfile(rawname, std::ios::binary);
+// 	for (j=screenheight-1; j>=0; j--)
+// 		for (i=0; i<screenwidth; i++)
+// 		{
+// 			myrawfile << (unsigned char) buffer_raw[(j*screenwidth+i)*4];
+// 			myrawfile << (unsigned char) buffer_raw[(j*screenwidth+i)*4+1];
+// 			myrawfile << (unsigned char) buffer_raw[(j*screenwidth+i)*4+2];
+// 		}
+// 	myrawfile.close();
+// 	delete buffer_raw;
 
 	cgGLDisableProfile(VertexProfile);
 	cgGLDisableProfile(FragmentProfile);
@@ -1379,7 +1218,7 @@ void Display(void)
 			fEnergyBase = fStar;
 			FILE *site_file = fopen("sites_result.txt", "w");
 			for(int i = 0; i < point_num; i++) {
-				fprintf(site_file, "%f %f\n", site_list[i].vertices[0].x / screenwidth * 2.0 - 1.0, site_list[i].vertices[0].y / screenheight * 2.0 - 1.0);
+				fprintf(site_file, "%f %f\n", (site_list[i].vertices[0].x - 1.0) / (screenwidth - 1.0), (site_list[i].vertices[0].y - 1.0) / (screenheight - 1.0));
 			}
 			fclose(site_file);
 			printf("Base Updated!\n");
