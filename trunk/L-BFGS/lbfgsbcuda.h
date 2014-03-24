@@ -30,7 +30,7 @@ Contributors:
 
 #pragma once
 
-#include <cutil_inline.h>
+#include "cutil_inline.h"
 #include <cublas_v2.h>
 
 extern cublasHandle_t cublasHd;

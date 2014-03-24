@@ -11,17 +11,8 @@ All Rights Reserved.
 */
 
 #include <math.h>
-#include <GL/glew.h>
-#include <GL/wglew.h>
-#include <GL/freeglut.h>
-#include <Cg/cg.h>
-#include <Cg/cgGL.h>
-#include <GL/glext.h>
 #include <time.h>
-#include <imdebug.h>
-#include <imdebuggl.h>
-#include <cutil_inline.h>
-#include <cutil_gl_inline.h>
+#include "L-BFGS/cutil_inline.h"
 
 #include "L-BFGS/lbfgsb.h"
 
