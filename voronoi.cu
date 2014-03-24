@@ -1,5 +1,5 @@
-#include <cutil_inline.h>
-#include "L-BFGS\lbfgsbcuda.h"
+#include "L-BFGS/cutil_inline.h"
+#include "L-BFGS/lbfgsbcuda.h"
 
 
 texture<float4, 2, cudaReadModeElementType> inTex;
