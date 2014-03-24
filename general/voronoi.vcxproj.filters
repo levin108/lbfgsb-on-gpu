@@ -34,6 +34,9 @@
     <ClInclude Include="L-BFGS\lbfgsbcuda.h">
       <Filter>L-BFGS</Filter>
     </ClInclude>
+    <ClInclude Include="L-BFGS\cutil_inline.h">
+      <Filter>L-BFGS</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="voronoi.rc" />

@@ -28,7 +28,6 @@ Contributors:
 	  pp. 550 - 560.
 *************************************************************************/
 
-#include <cutil_inline.h>
 #include "lbfgsbcuda.h"
 #include <cublas_v2.h>
 

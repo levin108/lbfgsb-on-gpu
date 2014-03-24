@@ -32,7 +32,7 @@ Contributors:
 #define _lbfgsb_h
 
 #include "lbfgsbcuda.h"
-#include <cutil_inline.h>
+#include "cutil_inline.h"
 #include <cublas_v2.h>
 
 extern int numIter;
